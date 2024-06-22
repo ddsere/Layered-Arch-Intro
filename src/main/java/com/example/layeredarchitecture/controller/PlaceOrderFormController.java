@@ -1,11 +1,12 @@
 package com.example.layeredarchitecture.controller;
 
-import com.example.layeredarchitecture.DAO.custom.CustomerDAO;
-import com.example.layeredarchitecture.DAO.custom.ItemDAO;
-import com.example.layeredarchitecture.DAO.custom.impl.CustomerDAOImpl;
-import com.example.layeredarchitecture.DAO.custom.impl.ItemDAOImpl;
-import com.example.layeredarchitecture.DAO.custom.impl.OrderDAOImpl;
-import com.example.layeredarchitecture.DAO.custom.impl.OrderDetailDAOImpl;
+import com.example.layeredarchitecture.bo.BOFactory;
+import com.example.layeredarchitecture.bo.custom.CustomerBO;
+import com.example.layeredarchitecture.bo.custom.ItemBO;
+import com.example.layeredarchitecture.bo.custom.PlaceOrderBO;
+import com.example.layeredarchitecture.bo.impl.CustomerBOImpl;
+import com.example.layeredarchitecture.bo.impl.ItemBOImpl;
+import com.example.layeredarchitecture.bo.impl.PlaceOrderBOImpl;
 import com.example.layeredarchitecture.db.DBConnection;
 import com.example.layeredarchitecture.model.CustomerDTO;
 import com.example.layeredarchitecture.model.ItemDTO;
@@ -56,10 +57,9 @@ public class PlaceOrderFormController {
     public Label lblDate;
     public Label lblTotal;
     private String orderId;
-    ItemDAO itemDAO = new ItemDAOImpl();
-    CustomerDAO customerDAO = new CustomerDAOImpl();
-    OrderDAOImpl orderDAO = new OrderDAOImpl();
-    OrderDetailDAOImpl orderDetailDAO = new OrderDetailDAOImpl();
+    ItemBO itemBO = (ItemBO) BOFactory.getBoFactory().getBO(BOFactory.BOType.ITEM);
+    CustomerBO customerBO = (CustomerBO) BOFactory.getBoFactory().getBO(BOFactory.BOType.CUSTOMER);
+    PlaceOrderBO placeOrderBO = (PlaceOrderBO) BOFactory.getBoFactory().getBO(BOFactory.BOType.PLACE_ORDER);
 
     public void initialize() throws SQLException, ClassNotFoundException {
 
@@ -195,16 +195,16 @@ public class PlaceOrderFormController {
     }
 
     private boolean existItem(String code) throws SQLException, ClassNotFoundException {
-        return itemDAO.exist(code);
+        return itemBO.exist(code);
     }
 
     boolean existCustomer(String id) throws SQLException, ClassNotFoundException {
-        return customerDAO.exist(id);
+        return customerBO.exist(id);
     }
 
     public String generateNewOrderId() {
         try {
-            return orderDAO.generateNewId();
+            return placeOrderBO.generateNewId();
         } catch (SQLException e) {
             new Alert(Alert.AlertType.ERROR, "Failed to generate a new order id").show();
         } catch (ClassNotFoundException e) {
@@ -215,7 +215,7 @@ public class PlaceOrderFormController {
 
     private void loadAllCustomerIds() {
         try {
-            ArrayList<CustomerDTO> customerDTOS = customerDAO.loadAll();
+            ArrayList<CustomerDTO> customerDTOS = customerBO.loadAll();
 
             for (CustomerDTO customerDTO : customerDTOS){
                 cmbCustomerId.getItems().add(customerDTO.getId());
@@ -231,7 +231,7 @@ public class PlaceOrderFormController {
     private void loadAllItemCodes() {
         try {
             /*Get all items*/
-            ArrayList<ItemDTO> itemDTOS = itemDAO.loadAll();
+            ArrayList<ItemDTO> itemDTOS = itemBO.loadAll();
             for (ItemDTO itemDTO : itemDTOS){
                 cmbItemCode.getItems().add(itemDTO.getCode());
             }
@@ -310,7 +310,7 @@ public class PlaceOrderFormController {
 
     public void btnPlaceOrder_OnAction(ActionEvent actionEvent) {
         boolean b = saveOrder(orderId, LocalDate.now(), cmbCustomerId.getValue(),
-                tblOrderDetails.getItems().stream().map(tm -> new OrderDetailDTO(tm.getCode(), tm.getQty(), tm.getUnitPrice())).collect(Collectors.toList()));
+                tblOrderDetails.getItems().stream().map(tm -> new OrderDetailDTO(orderId, tm.getCode(), tm.getQty(), tm.getUnitPrice())).collect(Collectors.toList()));
 
         if (b) {
             new Alert(Alert.AlertType.INFORMATION, "Order has been placed successfully").show();
@@ -332,16 +332,19 @@ public class PlaceOrderFormController {
         try {
             Connection connection = DBConnection.getDbConnection().getConnection();
 
-            orderDAO.exist(orderId);
+            boolean b1 =placeOrderBO.exist(orderId);
+            if (b1){
+                return false;
+            }
             connection.setAutoCommit(false);
-            boolean b1 = orderDAO.save(new OrderDTO(orderId, orderDate, customerId));
-            if (!b1) {
+            boolean b2 = placeOrderBO.save(new OrderDTO(orderId, orderDate, customerId));
+            if (!b2) {
                 connection.rollback();
                 connection.setAutoCommit(true);
                 return false;
             }
             for (OrderDetailDTO detail : orderDetails) {
-                boolean isOrderDetailSaved = orderDetailDAO.save(detail);
+                boolean isOrderDetailSaved = placeOrderBO.save(detail);
                 if (!isOrderDetailSaved) {
                     connection.rollback();
                     connection.setAutoCommit(true);
@@ -352,8 +355,8 @@ public class PlaceOrderFormController {
 //                //Search & Update Item
                 ItemDTO item = findItem(detail.getItemCode());
                 item.setQtyOnHand(item.getQtyOnHand() - detail.getQty());
-                boolean isItemUpdated = itemDAO.update(new ItemDTO(item.getCode(), item.getDescription(), item.getUnitPrice(), item.getQtyOnHand()));
-                if (isItemUpdated) {
+                boolean isItemUpdated = itemBO.update(new ItemDTO(item.getCode(), item.getDescription(), item.getUnitPrice(), item.getQtyOnHand()));
+                if (!isItemUpdated) {
                     connection.rollback();
                     connection.setAutoCommit(true);
                     return false;
@@ -375,7 +378,7 @@ public class PlaceOrderFormController {
 
     public ItemDTO findItem(String code) {
         try {
-            return itemDAO.searchAll(code);
+            return itemBO.searchAll(code);
             } catch (SQLException e) {
             throw new RuntimeException("Failed to find the Item " + code, e);
         } catch (ClassNotFoundException e) {
